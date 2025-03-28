@@ -174,6 +174,112 @@ class GoogleGenAIClient:
             ))
             return False
 
+    def display_response_dict(self, response, title="Response as Dictionary"):
+        """
+        Display the response dictionary in a beautiful way.
+        
+        Args:
+            response: The response from the model
+            title: The title for the panel
+        """
+        from rich.pretty import Pretty
+        
+        # Get the dictionary representation
+        response_dict = response.to_json_dict()
+        
+        # Display in a beautiful panel with nice formatting
+        self.console.print(Panel(
+            Pretty(response_dict),
+            title=f"[bold cyan]{title}[/bold cyan]",
+            border_style="green",
+            expand=False
+        ))
+        
+    def display_response_json(self, response, title="Response as JSON"):
+        """
+        Display the response JSON in a beautiful way.
+        
+        Args:
+            response: The response from the model
+            title: The title for the panel
+        """
+        import json
+        from rich.syntax import Syntax
+        
+        # Get the JSON representation and pretty-print it
+        response_json = response.model_dump_json()
+        formatted_json = json.dumps(json.loads(response_json), indent=2)
+        
+        # Display with syntax highlighting
+        self.console.print(Panel(
+            Syntax(formatted_json, "json", theme="monokai", line_numbers=True),
+            title=f"[bold cyan]{title}[/bold cyan]",
+            border_style="blue",
+            expand=False
+        ))
+    
+    def display_response_text(self, response, title="Model Response"):
+        """
+        Display the model's text response in a beautiful, readable format.
+        
+        This method formats and displays the text content from a model response
+        with proper styling, formatting, and structure to enhance readability.
+        It handles different types of content including paragraphs, bullet points,
+        and code blocks while maintaining the original structure.
+        
+        Args:
+            response: The response object from the model containing the text to display
+            title (str, optional): The title to display above the response. Defaults to "Model Response".
+        
+        Returns:
+            None: The formatted response is directly printed to the console
+        
+        Example:
+            >>> client = GoogleGenAIClient()
+            >>> response = client.client.models.generate_content(...)
+            >>> client.display_response_text(response, "Answer to Life Question")
+        """
+        from rich.markdown import Markdown
+        from rich.padding import Padding
+        
+        # Extract the text from the response
+        text = response.text
+        
+        # Check if the response text exists
+        if not text or text.strip() == "":
+            self.console.print(Panel(
+                "[italic yellow]Empty response received from the model.[/italic yellow]",
+                title=f"[bold cyan]{title}[/bold cyan]",
+                border_style="yellow",
+                expand=False
+            ))
+            return
+        
+        # Display the title header
+        self.console.print(f"\n[bold cyan]━━━ {title} ━━━[/bold cyan]")
+        
+        # Try to parse as markdown for better formatting
+        try:
+            # Add padding for better visual appearance
+            markdown_content = Markdown(text)
+            padded_content = Padding(markdown_content, (1, 2))
+            
+            # Display in a panel with a clean design
+            self.console.print(Panel(
+                padded_content,
+                border_style="bright_blue",
+                expand=False,
+                padding=(0, 1)
+            ))
+        except Exception:
+            # Fallback to simple panel if markdown parsing fails
+            self.console.print(Panel(
+                text,
+                border_style="bright_blue",
+                expand=False,
+                padding=(1, 2)
+            ))
+
 
 # Simple test if the module is run directly
 if __name__ == "__main__":

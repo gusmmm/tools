@@ -41,6 +41,9 @@ class KeyManager:
         key_value = os.environ.get(key_name)
         if key_value is None:
             raise ValueError(f"Key '{key_name}' not found in environment variables.")
+        
+        # Print success message when key is found
+        print(f"[green]✓ Successfully retrieved key: [bold]{key_name}[/bold][/green]")
         return key_value
 
     def validate_key(self, key_name: str):
@@ -55,3 +58,6 @@ class KeyManager:
         """
         if key_name not in os.environ:
             raise ValueError(f"Key '{key_name}' not found in environment variables.")
+        
+        # Print success message when key validation passes
+        print(f"[green]✓ Key validation passed for: [bold]{key_name}[/bold][/green]")
