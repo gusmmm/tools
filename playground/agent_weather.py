@@ -50,6 +50,8 @@ response = gervasio.client.models.generate_content(
 )
 
 gervasio.display_response_text(response, "Weather Report")
+gervasio.display_response_json(response, "Weather Report JSON")
+
 
 # test the get_weather_data function
 # city = "Porto"
