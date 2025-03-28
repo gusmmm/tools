@@ -381,6 +381,7 @@ dependencies = [
     { name = "google-genai" },
     { name = "pytest" },
     { name = "python-dotenv" },
+    { name = "requests" },
     { name = "rich" },
 ]
 
@@ -389,6 +390,7 @@ requires-dist = [
     { name = "google-genai", specifier = ">=1.8.0" },
     { name = "pytest", specifier = ">=8.3.5" },
     { name = "python-dotenv", specifier = ">=1.1.0" },
+    { name = "requests", specifier = ">=2.32.3" },
     { name = "rich", specifier = ">=13.9.4" },
 ]
 
