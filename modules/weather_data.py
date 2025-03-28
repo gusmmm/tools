@@ -360,6 +360,337 @@ class WeatherDataService:
         
         self.console.print(table)
 
+    def test_json_endpoints(self) -> None:
+        """
+        Tests and demonstrates the JSON data retrieval functions.
+        
+        This method provides examples of retrieving weather data in JSON format
+        and displays the results in a nicely formatted way.
+        """
+        self.console.print("[bold cyan]Testing Weather Data JSON Endpoints[/bold cyan]")
+        
+        # Menu for location selection
+        self.console.print("\n[yellow]Select a location:[/yellow]")
+        self.console.print("1. New York (40.7128, -74.0060)")
+        self.console.print("2. London (51.5074, -0.1278)")
+        self.console.print("3. Custom coordinates")
+        
+        choice = input("\nEnter choice (1-3): ")
+        
+        try:
+            if choice == "1":
+                lat, lon = 40.7128, -74.0060
+                location = "New York"
+            elif choice == "2":
+                lat, lon = 51.5074, -0.1278
+                location = "London"
+            elif choice == "3":
+                lat = float(input("Enter latitude: "))
+                lon = float(input("Enter longitude: "))
+                location = input("Enter location name (optional): ") or f"{lat}, {lon}"
+            else:
+                self.console.print("[bold red]Invalid choice. Using default location.[/bold red]")
+                lat, lon = 40.7128, -74.0060
+                location = "New York"
+                
+            # Show menu for JSON format options
+            self.console.print("\n[yellow]Select JSON data to retrieve:[/yellow]")
+            self.console.print("1. Current weather only")
+            self.console.print("2. Forecast only")
+            self.console.print("3. Complete weather report")
+            
+            option = input("\nEnter choice (1-3): ")
+            
+            from rich.syntax import Syntax
+            import json
+            
+            if option == "1":
+                # Get and display current weather JSON
+                data = self.get_weather_json(lat, lon)
+                title = f"Current Weather JSON for {location}"
+            elif option == "2":
+                # Get and display forecast JSON
+                data = self.get_forecast_json(lat, lon)
+                title = f"Forecast JSON for {location}"
+            elif option == "3":
+                # Get and display complete weather JSON
+                data = self.get_complete_weather_json(lat, lon)
+                title = f"Complete Weather JSON for {location}"
+            else:
+                self.console.print("[bold red]Invalid choice. Showing current weather.[/bold red]")
+                data = self.get_weather_json(lat, lon)
+                title = f"Current Weather JSON for {location}"
+            
+            # Display the JSON with syntax highlighting
+            json_str = json.dumps(data, indent=2)
+            self.console.print(Panel(
+                Syntax(json_str, "json", theme="monokai", line_numbers=True),
+                title=f"[bold green]{title}[/bold green]",
+                border_style="green",
+                expand=False
+            ))
+            
+        except Exception as e:
+            self.console.print(f"[bold red]Error: {str(e)}[/bold red]")
+
+    def get_weather_json(self, latitude: float, longitude: float) -> Dict[str, Any]:
+        """
+        Retrieves current weather data in a standardized JSON format.
+        
+        This method fetches weather information from Open-Meteo API and transforms 
+        it into a well-structured JSON format that's consistent and easy to parse.
+        The returned JSON maintains only the essential weather information in a 
+        flattened, intuitive structure.
+        
+        Args:
+            latitude (float): The geographical latitude (between -90 and 90 degrees)
+            longitude (float): The geographical longitude (between -180 and 180 degrees)
+        
+        Returns:
+            Dict[str, Any]: A dictionary containing formatted weather data with the following structure:
+            {
+                "location": {
+                    "latitude": float,
+                    "longitude": float
+                },
+                "current": {
+                    "temperature": float,
+                    "weather_condition": str,
+                    "weather_code": int,
+                    "wind": {
+                        "speed": float,
+                        "direction": float,
+                        "direction_compass": str
+                    },
+                    "time": str (ISO format)
+                },
+                "units": {
+                    "temperature": "°C",
+                    "wind_speed": "km/h"
+                },
+                "status": {
+                    "success": bool,
+                    "message": str
+                }
+            }
+        
+        Raises:
+            ValueError: If latitude or longitude values are outside valid ranges
+        """
+        try:
+            # Get raw data from API
+            raw_data = self.get_weather(latitude, longitude)
+            
+            if not raw_data or "current_weather" not in raw_data:
+                return {
+                    "status": {
+                        "success": False,
+                        "message": "Failed to retrieve weather data"
+                    }
+                }
+            
+            # Extract current weather data
+            current = raw_data["current_weather"]
+            
+            # Transform into standardized JSON format
+            formatted_data = {
+                "location": {
+                    "latitude": latitude,
+                    "longitude": longitude
+                },
+                "current": {
+                    "temperature": current["temperature"],
+                    "weather_condition": self._get_weather_description(current["weathercode"]),
+                    "weather_code": current["weathercode"],
+                    "wind": {
+                        "speed": current["windspeed"],
+                        "direction": current["winddirection"],
+                        "direction_compass": self._get_wind_direction_text(current["winddirection"])
+                    },
+                    "time": current["time"]
+                },
+                "units": {
+                    "temperature": "°C",
+                    "wind_speed": "km/h"
+                },
+                "status": {
+                    "success": True,
+                    "message": "Weather data retrieved successfully"
+                }
+            }
+            
+            return formatted_data
+        
+        except Exception as e:
+            self.logger.error(f"Error formatting weather data: {e}")
+            return {
+                "status": {
+                    "success": False,
+                    "message": f"Error: {str(e)}"
+                }
+            }
+
+    def get_forecast_json(self, latitude: float, longitude: float, days: int = 7) -> Dict[str, Any]:
+        """
+        Retrieves weather forecast data in a standardized JSON format.
+        
+        This method fetches forecast information from Open-Meteo API and transforms 
+        it into a structured JSON format that's consistent and easy to parse.
+        The returned JSON includes daily forecasts with temperature ranges and 
+        precipitation data.
+        
+        Args:
+            latitude (float): The geographical latitude (between -90 and 90 degrees)
+            longitude (float): The geographical longitude (between -180 and 180 degrees)
+            days (int, optional): Number of forecast days to retrieve (max 7). Defaults to 7.
+        
+        Returns:
+            Dict[str, Any]: A dictionary containing formatted forecast data with the following structure:
+            {
+                "location": {
+                    "latitude": float,
+                    "longitude": float
+                },
+                "forecast": [
+                    {
+                        "date": str (YYYY-MM-DD),
+                        "temperature": {
+                            "min": float,
+                            "max": float
+                        },
+                        "precipitation": float
+                    },
+                    ...
+                ],
+                "units": {
+                    "temperature": "°C",
+                    "precipitation": "mm"
+                },
+                "status": {
+                    "success": bool,
+                    "message": str
+                }
+            }
+        
+        Raises:
+            ValueError: If latitude or longitude values are outside valid ranges
+        """
+        try:
+            # Validate days parameter
+            if not 1 <= days <= 7:
+                days = 7  # Default to 7 if invalid
+            
+            # Get raw forecast data
+            raw_data = self.get_weather(latitude, longitude, include_forecast=True)
+            
+            if not raw_data or "daily" not in raw_data:
+                return {
+                    "status": {
+                        "success": False,
+                        "message": "Failed to retrieve forecast data"
+                    }
+                }
+            
+            # Extract daily forecast data
+            daily = raw_data["daily"]
+            
+            # Transform into standardized JSON format
+            forecast_days = []
+            for i in range(min(days, len(daily["time"]))):
+                forecast_days.append({
+                    "date": daily["time"][i],
+                    "temperature": {
+                        "min": daily["temperature_2m_min"][i],
+                        "max": daily["temperature_2m_max"][i]
+                    },
+                    "precipitation": daily["precipitation_sum"][i]
+                })
+            
+            formatted_data = {
+                "location": {
+                    "latitude": latitude,
+                    "longitude": longitude
+                },
+                "forecast": forecast_days,
+                "units": {
+                    "temperature": "°C",
+                    "precipitation": "mm"
+                },
+                "status": {
+                    "success": True,
+                    "message": f"Forecast data retrieved successfully for {len(forecast_days)} days"
+                }
+            }
+            
+            return formatted_data
+        
+        except Exception as e:
+            self.logger.error(f"Error formatting forecast data: {e}")
+            return {
+                "status": {
+                    "success": False,
+                    "message": f"Error: {str(e)}"
+                }
+            }
+
+    def get_complete_weather_json(self, latitude: float, longitude: float) -> Dict[str, Any]:
+        """
+        Retrieves both current weather and forecast data in a combined JSON format.
+        
+        This method provides a comprehensive weather report including both current
+        conditions and future forecast in a single, well-structured JSON response.
+        It's useful for applications that need to display complete weather information
+        at once.
+        
+        Args:
+            latitude (float): The geographical latitude (between -90 and 90 degrees)
+            longitude (float): The geographical longitude (between -180 and 180 degrees)
+        
+        Returns:
+            Dict[str, Any]: A dictionary containing both current weather and forecast data
+            with a unified structure combining both datasets.
+        
+        Raises:
+            ValueError: If latitude or longitude values are outside valid ranges
+        """
+        try:
+            # Get current weather and forecast separately
+            current_data = self.get_weather_json(latitude, longitude)
+            forecast_data = self.get_forecast_json(latitude, longitude)
+            
+            # Combine into a single response
+            combined_data = {
+                "location": current_data.get("location", {
+                    "latitude": latitude,
+                    "longitude": longitude
+                }),
+                "current": current_data.get("current", {}),
+                "forecast": forecast_data.get("forecast", []),
+                "units": {
+                    **current_data.get("units", {}),
+                    **forecast_data.get("units", {})
+                },
+                "status": {
+                    "success": current_data.get("status", {}).get("success", False) and 
+                               forecast_data.get("status", {}).get("success", False),
+                    "message": "Complete weather data retrieved successfully" if 
+                               (current_data.get("status", {}).get("success", False) and 
+                                forecast_data.get("status", {}).get("success", False)) else
+                               "Partial or no data retrieved"
+                }
+            }
+            
+            return combined_data
+        
+        except Exception as e:
+            self.logger.error(f"Error creating combined weather data: {e}")
+            return {
+                "status": {
+                    "success": False,
+                    "message": f"Error: {str(e)}"
+                }
+            }
+
 
 # Test code to run if the module is executed directly
 if __name__ == "__main__":
@@ -372,8 +703,46 @@ if __name__ == "__main__":
     # Create the service
     weather_service = WeatherDataService()
     
-    # Display the menu
+    # Display the main menu
     try:
-        weather_service.weather_menu()
+        # Enhanced menu with JSON options
+        weather_service.console.print("[bold cyan]Weather Data Service[/bold cyan]")
+        
+        while True:
+            weather_service.console.print("\n[yellow]Select an option:[/yellow]")
+            weather_service.console.print("1. Get current weather by coordinates")
+            weather_service.console.print("2. Get 7-day forecast by coordinates")
+            weather_service.console.print("3. View example locations")
+            weather_service.console.print("4. Test JSON endpoints")
+            weather_service.console.print("0. Exit")
+            
+            choice = input("\nEnter choice (0-4): ")
+            
+            if choice == "0":
+                break
+            elif choice == "1":
+                try:
+                    lat = float(input("Enter latitude: "))
+                    lon = float(input("Enter longitude: "))
+                    location = input("Enter location name (optional): ")
+                    location = location if location.strip() else None
+                    weather_service.display_weather(lat, lon, location)
+                except ValueError:
+                    weather_service.console.print("[bold red]Invalid coordinates. Please enter numeric values.[/bold red]")
+            elif choice == "2":
+                try:
+                    lat = float(input("Enter latitude: "))
+                    lon = float(input("Enter longitude: "))
+                    location = input("Enter location name (optional): ")
+                    location = location if location.strip() else None
+                    weather_service.display_forecast(lat, lon, location)
+                except ValueError:
+                    weather_service.console.print("[bold red]Invalid coordinates. Please enter numeric values.[/bold red]")
+            elif choice == "3":
+                weather_service._show_example_locations()
+            elif choice == "4":
+                weather_service.test_json_endpoints()
+            else:
+                weather_service.console.print("[red]Invalid choice. Please try again.[/red]")
     except KeyboardInterrupt:
         print("\nExiting weather service.")
