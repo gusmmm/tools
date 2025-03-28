@@ -24,7 +24,7 @@ class GeocodingService:
         self.console = Console()
         self.logger = logging.getLogger(__name__)
     
-    def geocode(self, location: str) -> Optional[Tuple[float, float]]:
+    def geocode(self, location: str, country: Optional[str] = None) -> Optional[Tuple[float, float]]:
         """
         Converts a location name to latitude and longitude coordinates.
         
@@ -34,6 +34,8 @@ class GeocodingService:
         
         Args:
             location (str): The name of the location to geocode (e.g., "Porto, Portugal")
+            country (Optional[str]): Optional country name to automatically disambiguate results
+                                    without requiring user interaction
             
         Returns:
             Optional[Tuple[float, float]]: A tuple containing (latitude, longitude) if 
@@ -46,18 +48,21 @@ class GeocodingService:
         if not location or not isinstance(location, str) or location.strip() == "":
             raise ValueError("Location must be a non-empty string")
         
-        coordinates = self._get_coordinates_with_disambiguation(location)
+        coordinates = self._get_coordinates_with_disambiguation(location, country)
         return coordinates
     
-    def _get_coordinates_with_disambiguation(self, location: str) -> Optional[Tuple[float, float]]:
+    def _get_coordinates_with_disambiguation(self, location: str, country: Optional[str] = None) -> Optional[Tuple[float, float]]:
         """
         Gets coordinates for a location with country disambiguation if needed.
         
         This internal method handles the case when a location name is ambiguous
         (exists in multiple countries) by prompting the user to select the correct one.
+        If a country is provided and matches one of the results, it will automatically
+        select that country without user interaction.
         
         Args:
             location (str): The name of the location to geocode
+            country (Optional[str]): Optional country name to automatically disambiguate results
             
         Returns:
             Optional[Tuple[float, float]]: A tuple containing (latitude, longitude) if 
@@ -70,6 +75,10 @@ class GeocodingService:
             "limit": 10,  # Get several results to check for ambiguity
             "addressdetails": 1
         }
+        
+        # If country is provided, add it to the query to improve results
+        if country:
+            params["q"] = f"{location}, {country}"
         
         # Add user agent as required by Nominatim usage policy
         headers = {
@@ -96,19 +105,39 @@ class GeocodingService:
             countries = {}
             for result in results:
                 if "address" in result and "country" in result["address"]:
-                    country = result["address"]["country"]
-                    if country not in countries:
-                        countries[country] = []
-                    countries[country].append(result)
+                    result_country = result["address"]["country"]
+                    if result_country not in countries:
+                        countries[result_country] = []
+                    countries[result_country].append(result)
             
-            # If we have multiple countries, ask the user to disambiguate
-            if len(countries) > 1:
-                selected_result = self._prompt_country_selection(location, countries)
-                if not selected_result:
-                    return None
+            # If a country was provided and it's in the results, use it without asking
+            if country and country in countries:
+                country_results = countries[country]
+                if len(country_results) > 1:
+                    selected_result = self._select_specific_location(country_results)
+                else:
+                    selected_result = country_results[0]
+            # If country was provided but doesn't match any results, log a warning
+            elif country and country not in countries:
+                self.logger.warning(f"Provided country '{country}' not found in results. Proceeding with disambiguation.")
+                self.console.print(f"[yellow]Note: Specified country '{country}' not found in results[/yellow]")
+                # Continue with standard disambiguation
+                if len(countries) > 1:
+                    selected_result = self._prompt_country_selection(location, countries)
+                    if not selected_result:
+                        return None
+                else:
+                    # Just use the first result if no ambiguity
+                    selected_result = results[0]
+            # No country provided, proceed with standard disambiguation
             else:
-                # Just use the first result if no ambiguity
-                selected_result = results[0]
+                if len(countries) > 1:
+                    selected_result = self._prompt_country_selection(location, countries)
+                    if not selected_result:
+                        return None
+                else:
+                    # Just use the first result if no ambiguity
+                    selected_result = results[0]
             
             # Extract coordinates
             latitude = float(selected_result["lat"])
@@ -195,12 +224,29 @@ class GeocodingService:
         """
         Allows the user to select a specific location from multiple options in the same country.
         
+        If all locations have the same name and country, automatically selects the first option.
+        Otherwise, prompts the user to choose from multiple specific locations.
+        
         Args:
             locations (List[Dict]): A list of location results from the API
             
         Returns:
             Dict: The selected location result
         """
+        # Check if all locations represent the same place (same display name)
+        display_names = set()
+        for location in locations:
+            display_name = location.get("display_name", "")
+            # Extract just the main part (before first comma usually contains city, country)
+            main_part = display_name.split(',')[0].strip() if display_name else ""
+            display_names.add(main_part)
+        
+        # If there's only one unique main part in the display names, use first option
+        if len(display_names) == 1:
+            self.console.print(f"[yellow]Multiple similar locations found for [bold]{list(display_names)[0]}[/bold]. Using first option.[/yellow]")
+            return locations[0]
+        
+        # Otherwise show the selection menu
         self.console.print("\n[yellow]Multiple specific locations found. Please select one:[/yellow]")
         
         # Create a table for the options
@@ -231,7 +277,7 @@ class GeocodingService:
             except ValueError:
                 self.console.print("[red]Please enter a valid number.[/red]")
     
-    def get_location_details(self, location: str) -> Dict[str, Any]:
+    def get_location_details(self, location: str, country: Optional[str] = None) -> Dict[str, Any]:
         """
         Retrieves detailed information about a location including its coordinates.
         
@@ -241,6 +287,7 @@ class GeocodingService:
         
         Args:
             location (str): The name of the location to look up
+            country (Optional[str]): Optional country name to automatically disambiguate results
             
         Returns:
             Dict[str, Any]: A dictionary containing detailed location information, including:
@@ -257,7 +304,7 @@ class GeocodingService:
             raise ValueError("Location must be a non-empty string")
         
         # First attempt to geocode with disambiguation
-        coordinates = self._get_coordinates_with_disambiguation(location)
+        coordinates = self._get_coordinates_with_disambiguation(location, country)
         
         if not coordinates:
             return {
@@ -358,8 +405,9 @@ class GeocodingService:
             for i, location in enumerate(sample_locations, 1):
                 self.console.print(f"{i}. {location}")
             
-            # Custom location option
+            # Custom location options
             self.console.print(f"{len(sample_locations) + 1}. Enter custom location")
+            self.console.print(f"{len(sample_locations) + 2}. Enter custom location with country")
             self.console.print("0. Back")
             
             try:
@@ -369,8 +417,15 @@ class GeocodingService:
                     break
                 elif 1 <= choice <= len(sample_locations):
                     location = sample_locations[choice - 1]
+                    country = None  # No specific country for predefined locations
                 elif choice == len(sample_locations) + 1:
                     location = input("Enter location name: ")
+                    country = None  # No country specified
+                elif choice == len(sample_locations) + 2:
+                    location = input("Enter location name: ")
+                    country = input("Enter country name: ")
+                    if not country.strip():  # If country is empty
+                        country = None
                 else:
                     self.console.print("[red]Invalid choice. Please try again.[/red]")
                     continue
@@ -378,10 +433,10 @@ class GeocodingService:
                 # Allow the user to try a different location if geocoding fails
                 while True:
                     # Display geocoding results
-                    self.console.print(f"\n[cyan]Geocoding: {location}[/cyan]")
+                    self.console.print(f"\n[cyan]Geocoding: {location}{' (in ' + country + ')' if country else ''}[/cyan]")
                     
                     # Get basic coordinates with country disambiguation
-                    coords = self.geocode(location)
+                    coords = self.geocode(location, country)
                     if coords:
                         lat, lon = coords
                         self.console.print(f"Latitude: [bold]{lat}[/bold]")
@@ -390,7 +445,7 @@ class GeocodingService:
                         # Ask if user wants detailed information
                         show_details = input("\nShow detailed location information? (y/n): ").lower()
                         if show_details == 'y':
-                            details = self.get_location_details(location)
+                            details = self.get_location_details(location, country)
                             
                             if details["status"]["success"]:
                                 from rich.pretty import Pretty
@@ -408,6 +463,13 @@ class GeocodingService:
                         retry = input("Try a different location? (y/n): ").lower()
                         if retry == 'y':
                             location = input("Enter new location name: ")
+                            country_choice = input("Specify country? (y/n): ").lower()
+                            if country_choice == 'y':
+                                country = input("Enter country name: ")
+                                if not country.strip():  # If country is empty
+                                    country = None
+                            else:
+                                country = None
                         else:
                             break
                 
