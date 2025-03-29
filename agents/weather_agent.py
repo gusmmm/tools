@@ -296,7 +296,7 @@ if __name__ == "__main__":
         print_to_terminal=True
     )
     
-    # Main application loop
+    # Main application loopprint_to_terminal=True
     while True:
         choice = show_menu()
         
